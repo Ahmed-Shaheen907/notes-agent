@@ -78,5 +78,13 @@ function runMigrations(db: Database.Database): void {
       embedding TEXT NOT NULL,
       FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
     );
+
+    -- User accounts. username is stored lowercase for case-insensitive lookups.
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      created_at    TEXT NOT NULL
+    );
   `);
 }
