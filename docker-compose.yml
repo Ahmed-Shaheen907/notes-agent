@@ -2,15 +2,13 @@ services:
   notes-agent:
     build: .
     image: notes-agent
-    stdin_open: true   # Keep stdin open so readline can receive input
-    tty: true          # Allocate a pseudo-TTY for the interactive prompt
+    ports:
+      - "3000:3000"   # http://localhost:3000 on your machine → port 3000 in container
     environment:
-      # Set your API keys in a .env file at the project root.
-      # docker-compose automatically loads .env files.
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # docker-compose automatically reads your .env file
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEFAULT_USER=${DEFAULT_USER:-default}
     volumes:
-      # Mount the current directory so the SQLite file (notes.db) persists
-      # on your host machine even after the container stops.
+      # SQLite database persists on your machine even after the container stops
       - ./data:/app/data

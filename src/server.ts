@@ -7,8 +7,17 @@ import type { Session } from "./agent";
 const app = express();
 app.use(express.json());
 
-// Serve the HTML chat UI from the public/ folder
-app.use(express.static(path.join(__dirname, "..", "public")));
+// Serve the HTML chat UI from the public/ folder.
+// We use process.cwd() (the directory npm run dev was called from) rather than
+// __dirname (which points to src/) so the path is always correct regardless of
+// how the process is started.
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+app.use(express.static(PUBLIC_DIR));
+
+// Explicit fallback — always serve index.html for the root so there's never a 404
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
 
 // ─── In-memory session store ──────────────────────────────────────────────────
 

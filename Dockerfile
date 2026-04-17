@@ -22,18 +22,19 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy the compiled output from the build stage
+# Copy compiled JS from build stage and the static HTML chat UI
 COPY --from=builder /app/dist ./dist
+COPY public/ ./public/
 
-# The SQLite database file will live at /app/notes.db.
-# Mount a host volume here so data persists across container restarts.
-VOLUME ["/app"]
+# Create the data directory for SQLite
+RUN mkdir -p /app/data
 
-# Pass API keys via environment variables at runtime:
-#   docker run -e ANTHROPIC_API_KEY=... notes-agent
-ENV ANTHROPIC_API_KEY=""
+EXPOSE 3000
+
+ENV GEMINI_API_KEY=""
 ENV OPENAI_API_KEY=""
 ENV DEFAULT_USER="default"
+ENV PORT="3000"
 
-# Run the compiled CLI
-CMD ["node", "dist/index.js"]
+# Run the web server (not the CLI)
+CMD ["node", "dist/server.js"]
