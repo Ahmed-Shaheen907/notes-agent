@@ -305,8 +305,8 @@ async function runScenario(
 }
 
 async function runEval(): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("ANTHROPIC_API_KEY is required to run the eval harness.");
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("OPENAI_API_KEY is required to run the eval harness.");
     process.exit(1);
   }
 

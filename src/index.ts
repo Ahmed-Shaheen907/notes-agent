@@ -26,8 +26,8 @@ function resolveUserId(): string {
 
 async function main(): Promise<void> {
   // Validate that the required API key is present before doing anything.
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("Error: ANTHROPIC_API_KEY is not set.");
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Error: OPENAI_API_KEY is not set.");
     console.error("Copy .env.example to .env and add your key.");
     process.exit(1);
   }

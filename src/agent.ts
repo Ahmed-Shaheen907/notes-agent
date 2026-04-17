@@ -1,11 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { tools } from "./tools/schemas";
 import { dispatchTool } from "./tools/index";
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 /**
- * The system prompt shapes Claude's personality and sets hard rules.
+ * The system prompt shapes the model's personality and sets hard rules.
  * Keeping it concise but specific produces more consistent behaviour than
  * a long, vague set of instructions.
  */
@@ -24,103 +24,101 @@ Core rules:
 
 /**
  * The conversation state is a simple array of messages.
- * This is passed to every API call, so Claude always has the full context.
+ * This is passed to every API call, so the model always has the full context.
  *
  * Multi-turn awareness is "free" because of this: when the user says
- * "actually, add a deadline to that last note", Claude can see the previous
+ * "actually, add a deadline to that last note", the model can see the previous
  * note creation in the messages array and knows which note to update.
  */
-export type ConversationMessages = Anthropic.MessageParam[];
+export type ConversationMessages = OpenAI.ChatCompletionMessageParam[];
 
-/** Creates a fresh, empty conversation. */
+/** Creates a fresh conversation with just the system prompt. */
 export function createConversation(): ConversationMessages {
-  return [];
+  return [{ role: "system", content: SYSTEM_PROMPT }];
 }
 
 // ─── Main agent step ──────────────────────────────────────────────────────────
 
 /**
- * Processes one user turn and returns Claude's final text response.
+ * Processes one user turn and returns the model's final text response.
  *
  * This function implements the "agentic loop":
  *
  *   1. Add user message to the history array
- *   2. Call Claude with tools + full history
- *   3. If Claude calls a tool → execute it, add the result, go back to 2
- *   4. If Claude returns text → we're done, return that text
+ *   2. Call the model with tools + full history
+ *   3. If the model calls a tool → execute it, add the result, go back to 2
+ *   4. If the model returns text → we're done, return that text
  *
- * The loop continues until Claude produces a final text response. In practice
- * most turns require 1–2 tool calls before Claude answers.
+ * The loop continues until the model produces a final text response. In practice
+ * most turns require 1–2 tool calls before the model answers.
+ *
+ * OpenAI difference from Anthropic:
+ *  - Tool arguments arrive as a JSON STRING (not an object) — we must JSON.parse them.
+ *  - Tool results are added as { role: "tool", tool_call_id, content } messages.
+ *  - The finish_reason is "tool_calls" (not "tool_use").
  *
  * @param messages - The running conversation history (mutated in place)
  * @param userMessage - The new message from the user
  * @param userId - Used for multi-user data isolation
- * @returns Claude's final natural-language reply
+ * @returns The model's final natural-language reply
  */
 export async function runAgentTurn(
   messages: ConversationMessages,
   userMessage: string,
   userId: string
 ): Promise<string> {
-  const client = new Anthropic();
+  const client = new OpenAI();
 
   // Add the user's message to the conversation history.
   messages.push({ role: "user", content: userMessage });
 
-  // The agentic loop — keeps going until Claude stops calling tools.
+  // The agentic loop — keeps going until the model stops calling tools.
   while (true) {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
       tools,
       messages,
     });
 
-    // Add Claude's response to history so the next call has full context.
-    messages.push({ role: "assistant", content: response.content });
+    const choice = response.choices[0];
 
-    // Check why Claude stopped generating.
-    if (response.stop_reason === "end_turn") {
-      // Claude is done — extract the text from its response.
-      const textBlock = response.content.find((b) => b.type === "text");
-      return textBlock && textBlock.type === "text"
-        ? textBlock.text
-        : "(no response)";
+    // Add the assistant's response to history so the next call has full context.
+    messages.push(choice.message);
+
+    if (choice.finish_reason === "stop") {
+      // Model is done — return its text content.
+      return choice.message.content ?? "(no response)";
     }
 
-    if (response.stop_reason === "tool_use") {
-      // Claude wants to call one or more tools. Execute them all, then loop.
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    if (choice.finish_reason === "tool_calls") {
+      // Model wants to call one or more tools. Execute them all, then loop.
+      const toolCalls = choice.message.tool_calls ?? [];
 
-      for (const block of response.content) {
-        if (block.type !== "tool_use") continue;
+      for (const toolCall of toolCalls) {
+        // OpenAI sends arguments as a JSON string — parse it into an object.
+        // We narrow the type to the standard function tool call shape.
+        if (toolCall.type !== "function") continue;
+        const toolInput = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
-        // Execute the tool and capture its output.
         const result = await dispatchTool(
-          block.name,
-          block.input as Record<string, unknown>,
+          toolCall.function.name,
+          toolInput,
           userId
         );
 
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
+        // Each tool result is its own message with role "tool".
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
           content: result,
         });
       }
 
-      // Add all tool results to the history so Claude can see what happened.
-      messages.push({ role: "user", content: toolResults });
-
-      // Loop back — Claude will now read the tool results and continue.
+      // Loop back — the model will now read the tool results and continue.
       continue;
     }
 
-    // Unexpected stop reason (e.g. max_tokens) — return whatever text we have.
-    const textBlock = response.content.find((b) => b.type === "text");
-    return textBlock && textBlock.type === "text"
-      ? textBlock.text
-      : "I ran out of space to respond. Please try rephrasing your request.";
+    // Unexpected finish reason (e.g. length) — return whatever text we have.
+    return choice.message.content ?? "I ran out of space to respond. Please try rephrasing your request.";
   }
 }
