@@ -1,6 +1,6 @@
 import "dotenv/config";
 import * as readline from "readline";
-import { createConversation, runAgentTurn } from "./agent";
+import { createSession, runAgentTurn } from "./agent";
 
 // ─── Multi-user: read userId from CLI args or env ─────────────────────────────
 
@@ -26,14 +26,14 @@ function resolveUserId(): string {
 
 async function main(): Promise<void> {
   // Validate that the required API key is present before doing anything.
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Error: OPENAI_API_KEY is not set.");
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("Error: GEMINI_API_KEY is not set.");
     console.error("Copy .env.example to .env and add your key.");
     process.exit(1);
   }
 
   const userId = resolveUserId();
-  const messages = createConversation();
+  const session = createSession(userId);
 
   // Set up the terminal readline interface.
   const rl = readline.createInterface({
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
 
       try {
         process.stdout.write("Agent: ");
-        const response = await runAgentTurn(messages, trimmed, userId);
+        const response = await runAgentTurn(session, trimmed);
         console.log(response);
         console.log(); // Blank line between turns for readability
       } catch (err) {

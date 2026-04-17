@@ -1,124 +1,104 @@
-import OpenAI from "openai";
-import { tools } from "./tools/schemas";
+import { GoogleGenerativeAI, ChatSession } from "@google/generative-ai";
+import { functionDeclarations } from "./tools/schemas";
 import { dispatchTool } from "./tools/index";
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-/**
- * The system prompt shapes the model's personality and sets hard rules.
- * Keeping it concise but specific produces more consistent behaviour than
- * a long, vague set of instructions.
- */
-const SYSTEM_PROMPT = `You are a personal note-taking assistant. You help users create, search, update, delete, and reason over their notes through natural conversation.
+export const SYSTEM_PROMPT =
+  `You are a personal note-taking assistant. You help users create, search, update, delete, and reason over their notes through natural conversation.
 
 Core rules:
 - Always search for a note before trying to update or delete it (so you have the ID).
 - If multiple notes match the user's description, list them and ask which one they mean. Never guess.
 - For deletions: always call delete_note with confirmed=false first to show a confirmation prompt. Only call with confirmed=true after the user explicitly agrees.
 - For ambiguous requests, ask a short clarifying question rather than assuming.
-- When a search returns no results, say so clearly and suggest alternatives (e.g. broaden the keyword, check tag spelling).
-- Keep responses concise. Don't repeat note content back to the user unless they asked for it.
-- You have access to semantic_search_notes for queries that require meaning-based matching rather than exact keyword matching.`;
+- When a search returns no results, say so clearly and suggest alternatives.
+- Keep responses concise. Don't repeat note content back unless the user asked for it.`;
 
-// ─── Conversation state ───────────────────────────────────────────────────────
+// ─── Session type ─────────────────────────────────────────────────────────────
 
 /**
- * The conversation state is a simple array of messages.
- * This is passed to every API call, so the model always has the full context.
- *
- * Multi-turn awareness is "free" because of this: when the user says
- * "actually, add a deadline to that last note", the model can see the previous
- * note creation in the messages array and knows which note to update.
+ * A Session wraps a Gemini ChatSession (which stores its own history internally)
+ * and the userId so the agent knows whose notes to read/write.
  */
-export type ConversationMessages = OpenAI.ChatCompletionMessageParam[];
-
-/** Creates a fresh conversation with just the system prompt. */
-export function createConversation(): ConversationMessages {
-  return [{ role: "system", content: SYSTEM_PROMPT }];
+export interface Session {
+  chat: ChatSession;
+  userId: string;
 }
 
-// ─── Main agent step ──────────────────────────────────────────────────────────
+/**
+ * Creates a new conversation session.
+ * Each web UI tab (or CLI run) gets its own Session so conversations don't mix.
+ */
+export function createSession(userId: string = "default"): Session {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    systemInstruction: SYSTEM_PROMPT,
+    // Gemini wraps tool definitions in { functionDeclarations: [...] }
+    tools: [{ functionDeclarations }],
+  });
+
+  const chat = model.startChat();
+  return { chat, userId };
+}
+
+// ─── Agentic loop ─────────────────────────────────────────────────────────────
 
 /**
- * Processes one user turn and returns the model's final text response.
+ * Sends one user message and runs the agentic loop until the model replies.
  *
- * This function implements the "agentic loop":
+ * How the Gemini tool loop works:
+ *  1. Send user message → model responds
+ *  2. If response contains functionCall parts → execute each tool
+ *  3. Send all results back as functionResponse parts → model responds again
+ *  4. Repeat until the model returns only text (no more function calls)
  *
- *   1. Add user message to the history array
- *   2. Call the model with tools + full history
- *   3. If the model calls a tool → execute it, add the result, go back to 2
- *   4. If the model returns text → we're done, return that text
- *
- * The loop continues until the model produces a final text response. In practice
- * most turns require 1–2 tool calls before the model answers.
- *
- * OpenAI difference from Anthropic:
- *  - Tool arguments arrive as a JSON STRING (not an object) — we must JSON.parse them.
- *  - Tool results are added as { role: "tool", tool_call_id, content } messages.
- *  - The finish_reason is "tool_calls" (not "tool_use").
- *
- * @param messages - The running conversation history (mutated in place)
- * @param userMessage - The new message from the user
- * @param userId - Used for multi-user data isolation
- * @returns The model's final natural-language reply
+ * Gemini's ChatSession stores history internally, so we don't manage a
+ * messages[] array manually like with OpenAI — the session object handles it.
  */
 export async function runAgentTurn(
-  messages: ConversationMessages,
-  userMessage: string,
-  userId: string
+  session: Session,
+  userMessage: string
 ): Promise<string> {
-  const client = new OpenAI();
+  // Send the user's message and get the initial response.
+  let result = await session.chat.sendMessage(userMessage);
 
-  // Add the user's message to the conversation history.
-  messages.push({ role: "user", content: userMessage });
-
-  // The agentic loop — keeps going until the model stops calling tools.
+  // The agentic loop — keeps going while the model is calling tools.
   while (true) {
-    const response = await client.chat.completions.create({
-      model: "gpt-4o",
-      tools,
-      messages,
-    });
+    const response = result.response;
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
 
-    const choice = response.choices[0];
+    // Collect any function calls the model wants to make.
+    const functionCalls = parts.filter((p) => p.functionCall);
 
-    // Add the assistant's response to history so the next call has full context.
-    messages.push(choice.message);
-
-    if (choice.finish_reason === "stop") {
-      // Model is done — return its text content.
-      return choice.message.content ?? "(no response)";
+    if (functionCalls.length === 0) {
+      // No tool calls — the model produced a final text answer.
+      return response.text();
     }
 
-    if (choice.finish_reason === "tool_calls") {
-      // Model wants to call one or more tools. Execute them all, then loop.
-      const toolCalls = choice.message.tool_calls ?? [];
+    // Execute every tool the model requested, collect the results.
+    const functionResponses = [];
+    for (const part of functionCalls) {
+      const { name, args } = part.functionCall!;
 
-      for (const toolCall of toolCalls) {
-        // OpenAI sends arguments as a JSON string — parse it into an object.
-        // We narrow the type to the standard function tool call shape.
-        if (toolCall.type !== "function") continue;
-        const toolInput = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+      const toolResult = await dispatchTool(
+        name,
+        args as Record<string, unknown>,
+        session.userId
+      );
 
-        const result = await dispatchTool(
-          toolCall.function.name,
-          toolInput,
-          userId
-        );
-
-        // Each tool result is its own message with role "tool".
-        messages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: result,
-        });
-      }
-
-      // Loop back — the model will now read the tool results and continue.
-      continue;
+      // Each result is wrapped in a functionResponse part.
+      functionResponses.push({
+        functionResponse: {
+          name,
+          response: { result: toolResult },
+        },
+      });
     }
 
-    // Unexpected finish reason (e.g. length) — return whatever text we have.
-    return choice.message.content ?? "I ran out of space to respond. Please try rephrasing your request.";
+    // Send all results back to the model so it can continue reasoning.
+    result = await session.chat.sendMessage(functionResponses);
   }
 }

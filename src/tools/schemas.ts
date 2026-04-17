@@ -1,217 +1,178 @@
-import OpenAI from "openai";
+import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
 
 /**
  * Tool schema definitions for every action the agent can take.
  *
  * Why tool use instead of a separate intent classifier?
  * -------------------------------------------------------
- * We pass these schemas directly to the OpenAI API. The model reads the names
+ * We pass these schemas directly to the Gemini API. The model reads the names
  * and descriptions, then decides which tool to call — it IS the intent router.
  * If the user's request is ambiguous, the model asks for clarification naturally
- * as part of the conversation, rather than routing to a "confused" state.
+ * rather than guessing.
  *
- * Each tool schema has three parts:
- *  - name: a snake_case identifier the model uses to reference the tool
- *  - description: plain English telling the model WHEN to use it
- *  - parameters: a JSON Schema object defining the arguments the model must fill
- *
- * OpenAI wraps each tool in a { type: "function", function: { ... } } envelope,
- * which is slightly different from Anthropic's flat format.
+ * Gemini format difference from OpenAI/Anthropic:
+ *  - Uses SchemaType enum (STRING, OBJECT, ARRAY, etc.) instead of lowercase strings
+ *  - Wrapped in a { functionDeclarations: [...] } object when passed to the model
+ *  - Tool results are sent back as { functionResponse: { name, response } } parts
  */
-export const tools: OpenAI.ChatCompletionTool[] = [
+export const functionDeclarations: FunctionDeclaration[] = [
   // ── 1. add_note ─────────────────────────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "add_note",
-      description:
-        "Create a new note and save it to the database. Use this when the user " +
-        "wants to save, record, write down, or remember something. " +
-        "Infer a short descriptive title from the user's text if they don't provide one explicitly.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: {
-            type: "string",
-            description: "A short, descriptive title for the note (max ~60 chars).",
-          },
-          body: {
-            type: "string",
-            description: "The full content of the note.",
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional list of tags or categories. Normalise to lowercase " +
-              "(e.g. ['meetings', 'urgent']). Infer tags from context if the " +
-              "user mentions a category but doesn't use the word 'tag'.",
-          },
+    name: "add_note",
+    description:
+      "Create a new note and save it to the database. Use this when the user " +
+      "wants to save, record, write down, or remember something. " +
+      "Infer a short descriptive title from the user's text if they don't provide one explicitly.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        title: {
+          type: SchemaType.STRING,
+          description: "A short, descriptive title for the note (max ~60 chars).",
         },
-        required: ["title", "body"],
+        body: {
+          type: SchemaType.STRING,
+          description: "The full content of the note.",
+        },
+        tags: {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING },
+          description:
+            "Optional list of tags. Normalise to lowercase (e.g. ['meetings', 'urgent']). " +
+            "Infer tags from context if the user mentions a category.",
+        },
       },
+      required: ["title", "body"],
     },
   },
 
   // ── 2. search_notes ──────────────────────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "search_notes",
-      description:
-        "Search the database for notes matching a keyword, tag, or date range. " +
-        "Use this when the user wants to find, list, show, or retrieve notes. " +
-        "If no filters are specified, it returns all notes. " +
-        "Always call this before update_note or delete_note to find the right note ID.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description:
-              "Keyword or phrase to search for in note titles and bodies. " +
-              "Leave blank to list all notes.",
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Filter by tags — only notes that have ALL of these tags are returned.",
-          },
-          date_from: {
-            type: "string",
-            description: "ISO 8601 date string (e.g. '2024-01-01'). Only return notes created on or after this date.",
-          },
-          date_to: {
-            type: "string",
-            description: "ISO 8601 date string (e.g. '2024-01-31'). Only return notes created on or before this date.",
-          },
+    name: "search_notes",
+    description:
+      "Search the database for notes matching a keyword, tag, or date range. " +
+      "Use this when the user wants to find, list, show, or retrieve notes. " +
+      "If no filters are specified, it returns all notes. " +
+      "Always call this before update_note or delete_note to find the right note ID.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: {
+          type: SchemaType.STRING,
+          description: "Keyword or phrase to search in titles and bodies. Leave blank to list all notes.",
         },
-        required: [],
+        tags: {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING },
+          description: "Filter by tags — only notes that have ALL of these tags are returned.",
+        },
+        date_from: {
+          type: SchemaType.STRING,
+          description: "ISO 8601 date (e.g. '2024-01-01'). Only return notes created on or after this date.",
+        },
+        date_to: {
+          type: SchemaType.STRING,
+          description: "ISO 8601 date (e.g. '2024-01-31'). Only return notes created on or before this date.",
+        },
       },
+      required: [],
     },
   },
 
   // ── 3. update_note ───────────────────────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "update_note",
-      description:
-        "Update the title, body, or tags of an existing note identified by its ID. " +
-        "You MUST have the exact note ID before calling this — use search_notes first " +
-        "if you don't have it. If multiple notes match the user's description, " +
-        "present the options and ask which one to update.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-            description: "The unique ID of the note to update (from search results).",
-          },
-          title: {
-            type: "string",
-            description: "New title. Omit to leave unchanged.",
-          },
-          body: {
-            type: "string",
-            description: "New body content. Omit to leave unchanged.",
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Replacement tag list. This REPLACES all existing tags — include " +
-              "any tags you want to keep. Omit this field to leave tags unchanged.",
-          },
+    name: "update_note",
+    description:
+      "Update the title, body, or tags of an existing note by its ID. " +
+      "You MUST have the exact note ID first — use search_notes to find it. " +
+      "If multiple notes match, list them and ask which one to update.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id: {
+          type: SchemaType.STRING,
+          description: "The unique ID of the note to update (from search results).",
         },
-        required: ["id"],
+        title: {
+          type: SchemaType.STRING,
+          description: "New title. Omit to leave unchanged.",
+        },
+        body: {
+          type: SchemaType.STRING,
+          description: "New body content. Omit to leave unchanged.",
+        },
+        tags: {
+          type: SchemaType.ARRAY,
+          items: { type: SchemaType.STRING },
+          description:
+            "Replacement tag list — REPLACES all existing tags. Include any tags you want to keep.",
+        },
       },
+      required: ["id"],
     },
   },
 
   // ── 4. delete_note ───────────────────────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "delete_note",
-      description:
-        "Permanently delete a note by ID. " +
-        "IMPORTANT: you must ALWAYS call this twice for a deletion to succeed: " +
-        "First call with confirmed=false to show the user what will be deleted. " +
-        "Only call with confirmed=true after the user explicitly says yes/confirm/delete it.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-            description: "The unique ID of the note to delete.",
-          },
-          confirmed: {
-            type: "boolean",
-            description:
-              "false = show a confirmation prompt to the user. " +
-              "true = execute the deletion (only after user has confirmed).",
-          },
+    name: "delete_note",
+    description:
+      "Permanently delete a note by ID. " +
+      "IMPORTANT: always call with confirmed=false first to show a preview. " +
+      "Only call with confirmed=true after the user explicitly says yes.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id: {
+          type: SchemaType.STRING,
+          description: "The unique ID of the note to delete.",
         },
-        required: ["id", "confirmed"],
+        confirmed: {
+          type: SchemaType.BOOLEAN,
+          description: "false = show confirmation prompt. true = execute deletion (after user confirmed).",
+        },
       },
+      required: ["id", "confirmed"],
     },
   },
 
   // ── 5. answer_question ───────────────────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "answer_question",
-      description:
-        "Fetch notes relevant to a question so you can reason over them — " +
-        "summarise, compare, detect contradictions, extract patterns, etc. " +
-        "Use this when the user asks a question ABOUT their notes rather than " +
-        "asking you to perform a CRUD operation. " +
-        "Examples: 'Summarise everything tagged urgent', " +
-        "'Do any of my notes contradict each other?', " +
-        "'What decisions did I make last week?'",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description:
-              "A search term or tag to narrow down which notes to fetch. " +
-              "Use an empty string to fetch ALL notes for full-corpus reasoning.",
-          },
+    name: "answer_question",
+    description:
+      "Fetch notes relevant to a question so you can reason over them — " +
+      "summarise, compare, detect contradictions, or extract patterns. " +
+      "Use this when the user asks a question ABOUT their notes, not when performing CRUD.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: {
+          type: SchemaType.STRING,
+          description: "Search term to narrow which notes to fetch. Empty string = fetch all notes.",
         },
-        required: ["query"],
       },
+      required: ["query"],
     },
   },
 
   // ── 6. semantic_search_notes (bonus) ─────────────────────────────────────────
   {
-    type: "function",
-    function: {
-      name: "semantic_search_notes",
-      description:
-        "Find notes that are semantically similar to a natural language query, " +
-        "even if they don't share any exact keywords. " +
-        "Use this when a keyword search would miss relevant notes — for example " +
-        "'find notes about project deadlines' might match a note that says " +
-        "'submit deliverables by Friday' without containing the word 'deadline'.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Natural language description of what you're looking for.",
-          },
-          top_k: {
-            type: "number",
-            description: "Maximum number of results to return (default 5).",
-          },
+    name: "semantic_search_notes",
+    description:
+      "Find notes semantically similar to a query, even without exact keyword matches. " +
+      "For example, 'project deadlines' can match a note saying 'submit deliverables by Friday'.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: {
+          type: SchemaType.STRING,
+          description: "Natural language description of what you're looking for.",
         },
-        required: ["query"],
+        top_k: {
+          type: SchemaType.NUMBER,
+          description: "Maximum number of results to return (default 5).",
+        },
       },
+      required: ["query"],
     },
   },
 ];

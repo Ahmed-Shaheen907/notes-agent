@@ -18,7 +18,7 @@
  */
 
 import "dotenv/config";
-import { createConversation, runAgentTurn } from "../src/agent";
+import { createSession, runAgentTurn } from "../src/agent";
 import {
   createNote,
   searchNotes,
@@ -289,12 +289,12 @@ async function runScenario(
   scenario: Scenario,
   index: number
 ): Promise<{ passed: boolean; error?: string }> {
-  const messages = createConversation();
+  const session = createSession(TEST_USER);
   let lastResponse = "";
 
   try {
     for (const turn of scenario.turns) {
-      lastResponse = await runAgentTurn(messages, turn, TEST_USER);
+      lastResponse = await runAgentTurn(session, turn);
     }
 
     const passed = await scenario.validate(lastResponse, TEST_USER);
@@ -305,8 +305,8 @@ async function runScenario(
 }
 
 async function runEval(): Promise<void> {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("OPENAI_API_KEY is required to run the eval harness.");
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("GEMINI_API_KEY is required to run the eval harness.");
     process.exit(1);
   }
 
