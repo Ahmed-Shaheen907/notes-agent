@@ -1,0 +1,16 @@
+services:
+  notes-agent:
+    build: .
+    image: notes-agent
+    stdin_open: true   # Keep stdin open so readline can receive input
+    tty: true          # Allocate a pseudo-TTY for the interactive prompt
+    environment:
+      # Set your API keys in a .env file at the project root.
+      # docker-compose automatically loads .env files.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEFAULT_USER=${DEFAULT_USER:-default}
+    volumes:
+      # Mount the current directory so the SQLite file (notes.db) persists
+      # on your host machine even after the container stops.
+      - ./data:/app/data

@@ -1,0 +1,30 @@
+{
+  "name": "notes-agent",
+  "version": "1.0.0",
+  "description": "Conversational note-taking agent powered by Claude",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "eval": "tsx tests/eval.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
+    "better-sqlite3": "^12.9.0",
+    "dotenv": "^17.4.2",
+    "nanoid": "^5.1.9",
+    "openai": "^6.34.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
