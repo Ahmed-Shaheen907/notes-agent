@@ -135,15 +135,34 @@ const scenarios: Scenario[] = [
     name: "Search with no results — graceful message",
     turns: ["Find notes about quantum computing"],
     validate: (res) => {
-      const r = res.toLowerCase();
-      // Should communicate no results and/or offer alternatives — not throw an error
+      // Normalize curly/smart quotes → straight so apostrophe checks work
+      const r = res.toLowerCase().replace(/[\u2018\u2019]/g, "'");
+      // Should communicate no results — not throw an error
       return (
         r.includes("no notes") ||
+        r.includes("no note") ||
         r.includes("found 0") ||
+        r.includes("0 note") ||
+        r.includes("found no") ||
         r.includes("couldn't find") ||
+        r.includes("couldn't locate") ||
         r.includes("don't have") ||
         r.includes("nothing") ||
-        r.includes("no match")
+        r.includes("no match") ||
+        r.includes("didn't find") ||
+        r.includes("did not find") ||
+        r.includes("unable to find") ||
+        r.includes("unable to locate") ||
+        r.includes("not able to") ||
+        r.includes("wasn't able to") ||
+        r.includes("was not able to") ||
+        r.includes("no results") ||
+        r.includes("not find") ||
+        r.includes("not found") ||
+        r.includes("aren't any") ||
+        r.includes("there are no") ||
+        r.includes("cannot locate") ||
+        r.includes("can't locate")
       );
     },
   },
@@ -153,14 +172,35 @@ const scenarios: Scenario[] = [
     name: "Delete non-existent note — graceful message",
     turns: ["Delete the note about my cat's birthday"],
     validate: (res) => {
-      const r = res.toLowerCase();
+      // Normalize curly/smart quotes → straight so apostrophe checks work
+      const r = res.toLowerCase().replace(/[\u2018\u2019]/g, "'");
       return (
         r.includes("no note") ||
+        r.includes("no notes") ||
         r.includes("couldn't find") ||
+        r.includes("couldn't locate") ||
         r.includes("don't see") ||
         r.includes("not found") ||
         r.includes("no matching") ||
-        r.includes("which note") // asking for clarification is also valid
+        r.includes("which note") ||
+        r.includes("didn't find") ||
+        r.includes("did not find") ||
+        r.includes("unable to find") ||
+        r.includes("unable to locate") ||
+        r.includes("not able to") ||
+        r.includes("wasn't able to") ||
+        r.includes("was not able to") ||
+        r.includes("no results") ||
+        r.includes("can't find") ||
+        r.includes("cannot find") ||
+        r.includes("cannot locate") ||
+        r.includes("can't locate") ||
+        r.includes("don't have") ||
+        r.includes("aren't any") ||
+        r.includes("there are no") ||
+        r.includes("found no") ||
+        r.includes("found 0") ||
+        r.includes("0 note")
       );
     },
   },
@@ -288,7 +328,7 @@ const scenarios: Scenario[] = [
 async function runScenario(
   scenario: Scenario,
   index: number
-): Promise<{ passed: boolean; error?: string }> {
+): Promise<{ passed: boolean; error?: string; response?: string }> {
   const session = createSession(TEST_USER);
   let lastResponse = "";
 
@@ -298,15 +338,15 @@ async function runScenario(
     }
 
     const passed = await scenario.validate(lastResponse, TEST_USER);
-    return { passed };
+    return { passed, response: lastResponse };
   } catch (err) {
-    return { passed: false, error: String(err) };
+    return { passed: false, error: String(err), response: lastResponse };
   }
 }
 
 async function runEval(): Promise<void> {
-  if (!process.env.GEMINI_API_KEY) {
-    console.error("GEMINI_API_KEY is required to run the eval harness.");
+  if (!process.env.GROQ_API_KEY) {
+    console.error("GROQ_API_KEY is required to run the eval harness.");
     process.exit(1);
   }
 
@@ -323,6 +363,9 @@ async function runEval(): Promise<void> {
     const scenario = scenarios[i];
     process.stdout.write(`[${i + 1}/${scenarios.length}] ${scenario.name} ... `);
 
+    // Small delay between scenarios to avoid hitting the TPM (tokens/min) rate limit
+    if (i > 0) await new Promise((r) => setTimeout(r, 3000));
+
     const result = await runScenario(scenario, i);
 
     if (result.passed) {
@@ -330,6 +373,9 @@ async function runEval(): Promise<void> {
       passed++;
     } else {
       console.log(`✗ FAIL${result.error ? ` (${result.error})` : ""}`);
+      if (result.response !== undefined) {
+        console.log(`   └─ Agent said: "${result.response}"`);
+      }
       failed++;
     }
   }

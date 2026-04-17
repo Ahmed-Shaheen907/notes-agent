@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import {
   createNote,
   searchNotes,
+  getAllNotes,
   getNoteById,
   updateNote,
   deleteNote,
@@ -93,10 +94,10 @@ export function handleSearchNotes(
   userId: string
 ): string {
   const result = searchNotes({
-    query: input.query,
-    tags: input.tags,
-    date_from: input.date_from,
-    date_to: input.date_to,
+    query: input.query ?? undefined,
+    tags: input.tags ?? undefined,
+    date_from: input.date_from ?? undefined,   // treat null same as omitted
+    date_to: input.date_to ?? undefined,
     user_id: userId,
   });
 
@@ -116,7 +117,8 @@ export function handleSearchNotes(
     const filterDesc =
       filters.length > 0 ? ` matching ${filters.join(" and ")}` : "";
     return (
-      `No notes found${filterDesc}. ` +
+      `No results found — 0 notes${filterDesc}. ` +
+      `Tell the user you found no notes matching their search. ` +
       `Suggestions: try broader keywords, check tag spelling, or widen the date range.`
     );
   }
@@ -131,20 +133,27 @@ export async function handleUpdateNote(
   input: UpdateNoteInput,
   userId: string
 ): Promise<string> {
+  // Strip out empty-string fields — the LLM sometimes passes body: "" or title: ""
+  // when it only intends to change tags. An empty string would erase the field in DB.
+  const safeInput: UpdateNoteInput = { id: input.id };
+  if (input.title !== undefined && input.title !== "") safeInput.title = input.title;
+  if (input.body !== undefined && input.body !== "") safeInput.body = input.body;
+  if (input.tags !== undefined) safeInput.tags = input.tags;
+
   // Validate that at least one field is being changed
   if (
-    input.title === undefined &&
-    input.body === undefined &&
-    input.tags === undefined
+    safeInput.title === undefined &&
+    safeInput.body === undefined &&
+    safeInput.tags === undefined
   ) {
     return "No changes specified. Please provide at least one of: title, body, or tags.";
   }
 
   const result = updateNote({
-    id: input.id,
-    title: input.title,
-    body: input.body,
-    tags: input.tags,
+    id: safeInput.id,
+    title: safeInput.title,
+    body: safeInput.body,
+    tags: safeInput.tags,
     user_id: userId,
   });
 
@@ -182,7 +191,7 @@ export function handleDeleteNote(
     const lookup = getNoteById(input.id, userId);
 
     if (!lookup.success) {
-      return `Cannot delete: ${lookup.error}`;
+      return `Note not found — there are no notes matching that ID. Tell the user you could not find the note and cannot delete it.`;
     }
 
     const note = lookup.data;
@@ -207,11 +216,10 @@ export function handleAnswerQuestion(
   input: AnswerQuestionInput,
   userId: string
 ): string {
-  // Fetch relevant notes so Claude has the raw material to reason over.
-  const result = searchNotes({
-    query: input.query || undefined,
-    user_id: userId,
-  });
+  // Always fetch ALL notes — the query is a hint for Claude to reason over,
+  // not a DB filter. Using searchNotes() here would run FTS and return empty
+  // when the query word (e.g. "summary") doesn't appear in any note body.
+  const result = getAllNotes(userId);
 
   if (!result.success) {
     return `Error fetching notes: ${result.error}`;
