@@ -64,6 +64,10 @@ docker compose up
 
 Open [http://localhost:3000](http://localhost:3000). Notes are saved to `./data/notes.db` on your host machine and survive container restarts.
 
+> ⚠️ **Always use `docker compose up`, not `docker compose run`.**
+> `docker compose run` skips the port mapping defined in `docker-compose.yml` so
+> the app will start but port 3000 won't be reachable from your browser.
+
 ```bash
 # Stop the container
 docker compose down
