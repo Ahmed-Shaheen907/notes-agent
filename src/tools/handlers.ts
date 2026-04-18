@@ -95,7 +95,7 @@ export function handleSearchNotes(
 ): string {
   const result = searchNotes({
     query: input.query ?? undefined,
-    tags: input.tags ?? undefined,
+    tags: input.tags ?? undefined,   // treat null same as omitted
     date_from: input.date_from ?? undefined,   // treat null same as omitted
     date_to: input.date_to ?? undefined,
     user_id: userId,

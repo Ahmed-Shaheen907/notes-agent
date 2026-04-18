@@ -62,9 +62,8 @@ export const tools: OpenAI.Chat.ChatCompletionTool[] = [
             description: "Keyword or phrase to search in titles and bodies. Leave blank to list all notes.",
           },
           tags: {
-            type: "array",
-            items: { type: "string" },
-            description: "Filter by tags — only notes that have ALL of these tags are returned.",
+            anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }],
+            description: "Filter by tags — only notes that have ALL of these tags are returned. Omit or pass null if not filtering by tag.",
           },
           date_from: {
             anyOf: [{ type: "string" }, { type: "null" }],
