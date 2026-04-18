@@ -26,15 +26,14 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY public/ ./public/
 
-# Create the data directory for SQLite
+# Create the data directory for SQLite (mounted as a volume in production)
 RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-ENV GEMINI_API_KEY=""
+ENV GROQ_API_KEY=""
 ENV OPENAI_API_KEY=""
-ENV DEFAULT_USER="default"
+ENV JWT_SECRET=""
 ENV PORT="3000"
 
-# Run the web server (not the CLI)
 CMD ["node", "dist/server.js"]

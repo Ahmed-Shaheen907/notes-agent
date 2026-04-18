@@ -5,10 +5,11 @@ services:
     ports:
       - "3000:3000"   # http://localhost:3000 on your machine → port 3000 in container
     environment:
-      # docker-compose automatically reads your .env file
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # docker-compose reads your .env file automatically
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DEFAULT_USER=${DEFAULT_USER:-default}
+      - JWT_SECRET=${JWT_SECRET:-change-this-in-production}
+      - PORT=3000
     volumes:
       # SQLite database persists on your machine even after the container stops
       - ./data:/app/data
